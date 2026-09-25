@@ -1,0 +1,34 @@
+# Updated compose: node builder runs node for mini build
+name: opencode
+
+services:
+  builder:
+    image: node:22-slim
+    command:
+      - sh
+      - -c
+      - |
+          apt-get update && apt-get install -y python3 make g++ git curl unzip && \
+          git config --global --add safe.directory /app && \
+          git config --global --add safe.directory /app/src && \
+          curl -fsSL https://bun.sh/install | bash && \
+          export PATH="/root/.bun/bin:$PATH" && \
+          cd /app/src/packages/sdk/js && \
+          bun install && \
+          rm -rf dist ./*.tsbuildinfo && \
+          bun tsc && \
+          cd /app/src/packages/opencode && \
+          bun install && \
+          OPENCODE_VERSION=1.18.31 bun run script/build-node.ts && \
+          bun run buildMini.js
+    working_dir: /app
+    volumes:
+      - ../:/app
+    user: root
+
+  runtime:
+    image: node:22-slim
+    volumes:
+      - ../:/app
+    working_dir: /app
+    command: node src/packages/opencode/dist/node/mini.js "write a short poem about the sun"
