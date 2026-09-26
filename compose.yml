@@ -31,4 +31,4 @@ services:
     volumes:
       - ../:/app
     working_dir: /app
-    command: node src/packages/opencode/dist/node/mini.js "write a short poem about the sun"
+    command: ./src/opencode "write a short poem about the sun"
