@@ -3,7 +3,7 @@ name: opencode
 
 services:
   builder:
-    image: node:22-slim
+    image: node:lts-slim
     command:
       - sh
       - -c
@@ -27,7 +27,7 @@ services:
     user: root
 
   runtime:
-    image: node:22-slim
+    image: node:lts-slim
     volumes:
       - ../:/app
     working_dir: /app
