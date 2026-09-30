@@ -1,0 +1,14 @@
+FROM node:lts-slim
+WORKDIR /app
+COPY opencode ./opencode
+COPY packages/opencode/dist ./packages/opencode/dist
+COPY packages/opencode/node_modules ./packages/opencode/node_modules
+COPY packages/sdk/js/dist ./packages/sdk/js/dist
+COPY packages/sdk/js/package.json ./packages/sdk/js/package.json
+COPY packages/sdk/js/node_modules/cross-spawn ./packages/sdk/js/node_modules/cross-spawn
+COPY packages/sdk/js/node_modules/which ./packages/sdk/js/node_modules/which
+COPY packages/sdk/js/node_modules/isexe ./packages/sdk/js/node_modules/isexe
+COPY packages/sdk/js/node_modules/path-key ./packages/sdk/js/node_modules/path-key
+COPY packages/sdk/js/node_modules/shebang-command ./packages/sdk/js/node_modules/shebang-command
+COPY packages/sdk/js/node_modules/shebang-regex ./packages/sdk/js/node_modules/shebang-regex
+ENTRYPOINT ["/app/opencode"]

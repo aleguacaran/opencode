@@ -20,7 +20,19 @@ services:
           cd /app/src/packages/opencode && \
           bun install && \
           OPENCODE_VERSION=1.18.31 bun run script/build-node.ts && \
-          bun run buildMini.js
+          bun run buildMini.js && \
+          rm -rf /app/.docker-context && \
+          mkdir -p /app/.docker-context && \
+          cp /app/src/Dockerfile.mini /app/.docker-context/Dockerfile.mini && \
+          tar -C /app/src --exclude='*.map' -cf - opencode packages/opencode/dist packages/opencode/node_modules packages/sdk/js/dist packages/sdk/js/package.json | tar -C /app/.docker-context -xf - && \
+          mkdir -p /app/.docker-context/packages/sdk/js/node_modules && \
+          cp -r /app/src/node_modules/.bun/cross-spawn@7.0.6/node_modules/cross-spawn /app/.docker-context/packages/sdk/js/node_modules/cross-spawn && \
+          cp -r /app/src/node_modules/.bun/which@2.0.2/node_modules/which /app/.docker-context/packages/sdk/js/node_modules/which && \
+          cp -r /app/src/node_modules/.bun/isexe@2.0.0/node_modules/isexe /app/.docker-context/packages/sdk/js/node_modules/isexe && \
+          cp -r /app/src/node_modules/.bun/path-key@3.1.1/node_modules/path-key /app/.docker-context/packages/sdk/js/node_modules/path-key && \
+          cp -r /app/src/node_modules/.bun/shebang-command@2.0.0/node_modules/shebang-command /app/.docker-context/packages/sdk/js/node_modules/shebang-command && \
+          cp -r /app/src/node_modules/.bun/shebang-regex@3.0.0/node_modules/shebang-regex /app/.docker-context/packages/sdk/js/node_modules/shebang-regex && \
+          rm -f /app/.docker-context/packages/opencode/dist/node/*.map /app/.docker-context/packages/opencode/dist/node/cli-main.js
     working_dir: /app
     volumes:
       - ../:/app
@@ -32,3 +44,9 @@ services:
       - ../:/app
     working_dir: /app
     command: ./src/opencode "write a short poem about the sun"
+
+  headless:
+    image: opencode-headless:latest
+    build:
+      context: ../.docker-context
+      dockerfile: Dockerfile.mini
