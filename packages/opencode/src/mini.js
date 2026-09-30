@@ -7,6 +7,9 @@
 // --------------------------------------------
 import { Server } from "./node.js";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2";
+import { basename, resolve } from "node:path";
+import { statSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 const usage = `Usage: opencode [flags] <message>
 
@@ -17,10 +20,15 @@ Flags:
       --agent <name>            agent to use
       --variant <variant>       model variant (reasoning effort)
       --title <title>           title for a new session
+  -f, --file <path>             attach file(s) to the message (repeatable)
+      --command <command>       run a slash-command instead of a prompt
+      --thinking                include reasoning blocks in the output
+      --format <format>         output format: default (text) or json (raw result)
+      --pure                    run without user plugins
   -h, --help                    show this help`;
 
-const aliases = { s: "session", m: "model", c: "continue", h: "help" };
-const valueFlags = new Set(["session", "model", "agent", "variant", "title"]);
+const aliases = { s: "session", m: "model", c: "continue", h: "help", f: "file" };
+const valueFlags = new Set(["session", "model", "agent", "variant", "title", "command"]);
 
 function parseArgs(argv) {
   const flags = {};
@@ -34,8 +42,13 @@ function parseArgs(argv) {
     const eq = arg.indexOf("=");
     const raw = (eq === -1 ? arg : arg.slice(0, eq)).replace(/^-+/, "");
     const name = aliases[raw] || raw;
-    if (name === "continue" || name === "help") {
+    if (name === "continue" || name === "help" || name === "thinking" || name === "pure") {
       flags[name] = true;
+      continue;
+    }
+    if (name === "file") {
+      flags.file ??= [];
+      flags.file.push(eq === -1 ? argv[++i] : arg.slice(eq + 1));
       continue;
     }
     flags[name] = eq === -1 ? argv[++i] : arg.slice(eq + 1);
@@ -49,18 +62,41 @@ function pickModel(value) {
   return { providerID, modelID: rest.join("/") };
 }
 
+function filePart(filePath) {
+  const resolvedPath = resolve(filePath);
+  let stat;
+  try {
+    stat = statSync(resolvedPath);
+  } catch {
+    console.error(`File not found: ${filePath}`);
+    process.exit(1);
+  }
+  if (!stat.isFile() && !stat.isDirectory()) {
+    console.error(`Cannot attach special file: ${filePath}`);
+    process.exit(1);
+  }
+  return {
+    type: "file",
+    url: pathToFileURL(resolvedPath).href,
+    filename: basename(resolvedPath),
+    mime: stat.isDirectory() ? "application/x-directory" : "text/plain",
+  };
+}
+
 async function main() {
   const { flags, message } = parseArgs(process.argv.slice(2));
   if (flags.help) {
     console.log(usage);
     process.exit(0);
   }
-  if (!message) {
+  if (!message && !flags.command) {
     console.error(usage);
     process.exit(1);
   }
+  if (flags.pure) process.env.OPENCODE_PURE = "true";
 
   const model = pickModel(flags.model);
+  const files = (flags.file ?? []).map(filePart);
   const client = createOpencodeClient({
     baseUrl: "http://opencode.internal",
     directory: process.cwd(),
@@ -92,19 +128,33 @@ async function main() {
       sessionID = session.data.id;
     }
 
-    const result = await client.session.prompt({
-      sessionID,
-      parts: [{ type: "text", text: message }],
-      agent: flags.agent,
-      variant: flags.variant,
-      model: model ? { providerID: model.providerID, modelID: model.modelID } : undefined,
-    });
+    const result = flags.command
+      ? await client.session.command({
+          sessionID,
+          agent: flags.agent,
+          model: flags.model,
+          arguments: message,
+          command: flags.command,
+          variant: flags.variant,
+          parts: files.length ? files : undefined,
+        })
+      : await client.session.prompt({
+          sessionID,
+          parts: [...files, { type: "text", text: message }],
+          agent: flags.agent,
+          variant: flags.variant,
+          model: model ? { providerID: model.providerID, modelID: model.modelID } : undefined,
+        });
     if (result.data.info?.error) {
       console.error("Model error:", result.data.info.error.data?.message || result.data.info.error);
       process.exit(1);
     }
+    if (flags.format === "json") {
+      console.log(JSON.stringify(result.data));
+      process.exit(0);
+    }
     const output = result.data.parts
-      .filter((p) => p.type === "text")
+      .filter((p) => p.type === "text" || (flags.thinking && p.type === "reasoning" && p.time?.end))
       .map((p) => p.text)
       .join("\n");
     console.log(output);
