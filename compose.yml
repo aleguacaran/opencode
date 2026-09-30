@@ -50,3 +50,9 @@ services:
     build:
       context: ../.docker-context
       dockerfile: Dockerfile.mini
+
+  release:
+    image: opencode-release:latest
+    build:
+      context: ../.docker-context-release
+      dockerfile: Dockerfile.release
