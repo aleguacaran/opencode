@@ -19,12 +19,19 @@ services:
           bun tsc && \
           cd /app/src/packages/opencode && \
           bun install && \
-          OPENCODE_VERSION=1.18.31 bun run script/build-node.ts && \
+          bun run script/build-node.ts && \
           bun run buildMini.js && \
+          cd /app/src/packages/opencode/dist/node && \
+          rm -rf node_modules && mkdir -p node_modules && \
+          cp -r /app/src/node_modules/.bun/jsonc-parser@3.3.1/node_modules/jsonc-parser node_modules/jsonc-parser && \
+          cp -r /app/src/node_modules/.bun/@lydell+node-pty@1.2.0-beta.12/node_modules/@lydell node_modules/@lydell && \
+          rm -rf node_modules/@lydell/node-pty-linux-x64 && \
+          cp -r /app/src/node_modules/.bun/@lydell+node-pty-linux-x64@1.2.0-beta.12/node_modules/@lydell/node-pty-linux-x64 node_modules/@lydell/node-pty-linux-x64 && \
+          cd /app/src/packages/opencode && \
           rm -rf /app/.docker-context && \
           mkdir -p /app/.docker-context && \
           cp /app/src/Dockerfile.mini /app/.docker-context/Dockerfile.mini && \
-          tar -C /app/src --exclude='*.map' -cf - opencode packages/opencode/dist packages/opencode/node_modules packages/sdk/js/dist packages/sdk/js/package.json | tar -C /app/.docker-context -xf - && \
+          tar -C /app/src --exclude='*.map' --exclude='packages/opencode/dist/opencode-*' -cf - opencode packages/opencode/dist packages/opencode/node_modules packages/sdk/js/dist packages/sdk/js/package.json | tar -C /app/.docker-context -xf - && \
           mkdir -p /app/.docker-context/packages/sdk/js/node_modules && \
           cp -r /app/src/node_modules/.bun/cross-spawn@7.0.6/node_modules/cross-spawn /app/.docker-context/packages/sdk/js/node_modules/cross-spawn && \
           cp -r /app/src/node_modules/.bun/which@2.0.2/node_modules/which /app/.docker-context/packages/sdk/js/node_modules/which && \
@@ -32,7 +39,8 @@ services:
           cp -r /app/src/node_modules/.bun/path-key@3.1.1/node_modules/path-key /app/.docker-context/packages/sdk/js/node_modules/path-key && \
           cp -r /app/src/node_modules/.bun/shebang-command@2.0.0/node_modules/shebang-command /app/.docker-context/packages/sdk/js/node_modules/shebang-command && \
           cp -r /app/src/node_modules/.bun/shebang-regex@3.0.0/node_modules/shebang-regex /app/.docker-context/packages/sdk/js/node_modules/shebang-regex && \
-          rm -f /app/.docker-context/packages/opencode/dist/node/*.map /app/.docker-context/packages/opencode/dist/node/cli-main.js
+          rm -f /app/.docker-context/packages/opencode/dist/node/*.map /app/.docker-context/packages/opencode/dist/node/cli-main.js && \
+          chown -R 1000:1000 /app/.docker-context
     working_dir: /app
     volumes:
       - ../:/app
