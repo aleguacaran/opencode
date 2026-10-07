@@ -13,12 +13,12 @@ services:
           git config --global --add safe.directory /app/src && \
           curl -fsSL https://bun.sh/install | bash && \
           export PATH="/root/.bun/bin:$PATH" && \
-          cd /app/src/packages/sdk/js && \
+          cd /app/src && \
           bun install && \
+          cd /app/src/packages/sdk/js && \
           rm -rf dist ./*.tsbuildinfo && \
           bun tsc && \
           cd /app/src/packages/opencode && \
-          bun install && \
           bun run script/build-node.ts && \
           bun run buildMini.js && \
           cd /app/src/packages/opencode/dist/node && \

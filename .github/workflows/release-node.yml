@@ -1,0 +1,96 @@
+name: release-node
+
+# Builds the node-based (bun-free runtime) opencode release and publishes it as
+# a GitHub release with a portable tarball. Runs daily and on demand; skips when
+# the version is already released.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (optional, defaults to latest npm)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency: release-node-${{ github.ref }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: docker-headless-mini
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Detect version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LATEST=$(curl -fsSL https://registry.npmjs.org/opencode-ai/latest | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -1)
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION:-$LATEST}"
+          if gh release view "node-v$VERSION" > /dev/null 2>&1; then
+            echo "node-v$VERSION already released"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build SDK
+        if: steps.version.outputs.skip != 'true'
+        working-directory: packages/sdk/js
+        run: bun tsc
+
+      - name: Build server bundle and mini
+        if: steps.version.outputs.skip != 'true'
+        working-directory: packages/opencode
+        env:
+          OPENCODE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          bun run script/build-node.ts
+          bun run buildMini.js
+
+      - name: Install runtime externals
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          mkdir -p packages/opencode/dist/node/node_modules
+          cd packages/opencode/dist/node
+          cp -r ../../../../node_modules/.bun/jsonc-parser@3.3.1/node_modules/jsonc-parser node_modules/jsonc-parser
+          cp -r "../../../../node_modules/.bun/@lydell+node-pty@1.2.0-beta.12/node_modules/@lydell" node_modules/@lydell
+          rm -f node_modules/@lydell/node-pty-linux-x64
+          cp -r "../../../../node_modules/.bun/@lydell+node-pty-linux-x64@1.2.0-beta.12/node_modules/@lydell/node-pty-linux-x64" node_modules/@lydell/node-pty-linux-x64
+
+      - name: Assemble release tree
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          TREE=$(mktemp -d)
+          cp opencode "$TREE/opencode"
+          mkdir -p "$TREE/packages"
+          cp -r packages/opencode/dist "$TREE/packages/opencode/dist"
+          cp -r packages/opencode/node_modules "$TREE/packages/opencode/node_modules"
+          mkdir -p "$TREE/packages/sdk/js"
+          cp -r packages/sdk/js/dist packages/sdk/js/package.json "$TREE/packages/sdk/js/"
+          mkdir -p "$TREE/packages/sdk/js/node_modules"
+          for p in cross-spawn@7.0.6/node_modules/cross-spawn which@2.0.2/node_modules/which isexe@2.0.0/node_modules/isexe path-key@3.1.1/node_modules/path-key shebang-command@2.0.0/node_modules/shebang-command shebang-regex@3.0.0/node_modules/shebang-regex; do
+            cp -r "node_modules/.bun/$p" "$TREE/packages/sdk/js/node_modules/${p##*/}"
+          done
+          tar -czf opencode-node-linux-x64.tar.gz -C "$TREE" opencode packages
+
+      - name: Release
+        if: steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "node-v${{ steps.version.outputs.version }}" \
+            opencode-node-linux-x64.tar.gz \
+            --title "node-v${{ steps.version.outputs.version }}" \
+            --notes "Node-based opencode ${{ steps.version.outputs.version }} (no bun needed at runtime). Extract and run ./opencode with node >= 22." \
+            --target "$(git rev-parse HEAD)"
