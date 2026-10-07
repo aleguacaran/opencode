@@ -5,6 +5,7 @@
 // run`), so no server process, port, or TCP connection is needed.
 // Flags mirror the default `opencode run` command.
 // --------------------------------------------
+import { parseArgs } from "node:util";
 import { Server } from "./node.js";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2";
 import { basename, resolve } from "node:path";
@@ -26,41 +27,6 @@ Flags:
       --format <format>         output format: default (text) or json (raw result)
       --pure                    run without user plugins
   -h, --help                    show this help`;
-
-const aliases = { s: "session", m: "model", c: "continue", h: "help", f: "file" };
-const valueFlags = new Set(["session", "model", "agent", "variant", "title", "command"]);
-
-function parseArgs(argv) {
-  const flags = {};
-  const message = [];
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (!arg.startsWith("-")) {
-      message.push(arg);
-      continue;
-    }
-    const eq = arg.indexOf("=");
-    const raw = (eq === -1 ? arg : arg.slice(0, eq)).replace(/^-+/, "");
-    const name = aliases[raw] || raw;
-    if (name === "continue" || name === "help" || name === "thinking" || name === "pure") {
-      flags[name] = true;
-      continue;
-    }
-    if (name === "file") {
-      flags.file ??= [];
-      flags.file.push(eq === -1 ? argv[++i] : arg.slice(eq + 1));
-      continue;
-    }
-    flags[name] = eq === -1 ? argv[++i] : arg.slice(eq + 1);
-  }
-  return { flags, message: message.join(" ") };
-}
-
-function pickModel(value) {
-  if (!value) return undefined;
-  const [providerID, ...rest] = value.split("/");
-  return { providerID, modelID: rest.join("/") };
-}
 
 function filePart(filePath) {
   const resolvedPath = resolve(filePath);
@@ -84,7 +50,26 @@ function filePart(filePath) {
 }
 
 async function main() {
-  const { flags, message } = parseArgs(process.argv.slice(2));
+  const { values: flags, positionals } = parseArgs({
+    args: process.argv.slice(2),
+    allowPositionals: true,
+    strict: false,
+    options: {
+      continue: { type: "boolean", short: "c" },
+      session: { type: "string", short: "s" },
+      model: { type: "string", short: "m" },
+      agent: { type: "string" },
+      variant: { type: "string" },
+      title: { type: "string" },
+      file: { type: "string", short: "f", multiple: true },
+      command: { type: "string" },
+      thinking: { type: "boolean" },
+      format: { type: "string" },
+      pure: { type: "boolean" },
+      help: { type: "boolean", short: "h" },
+    },
+  });
+  const message = positionals.join(" ");
   if (flags.help) {
     console.log(usage);
     process.exit(0);
@@ -95,7 +80,8 @@ async function main() {
   }
   if (flags.pure) process.env.OPENCODE_PURE = "true";
 
-  const model = pickModel(flags.model);
+  const [providerID, ...modelRest] = (flags.model ?? "").split("/");
+  const model = providerID ? { providerID, modelID: modelRest.join("/") } : undefined;
   const files = (flags.file ?? []).map(filePart);
   const client = createOpencodeClient({
     baseUrl: "http://opencode.internal",
@@ -165,7 +151,4 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error("Unexpected error:", e);
-  process.exit(1);
-});
+main();

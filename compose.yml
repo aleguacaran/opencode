@@ -8,7 +8,7 @@ services:
       - sh
       - -c
       - |
-          apt-get update && apt-get install -y python3 make g++ git curl unzip && \
+          apt-get update && apt-get install -y python3 make g++ git curl unzip libicu-dev && \
           git config --global --add safe.directory /app && \
           git config --global --add safe.directory /app/src && \
           curl -fsSL https://bun.sh/install | bash && \
@@ -27,20 +27,19 @@ services:
           cp -r /app/src/node_modules/.bun/@lydell+node-pty@1.2.0-beta.12/node_modules/@lydell node_modules/@lydell && \
           rm -rf node_modules/@lydell/node-pty-linux-x64 && \
           cp -r /app/src/node_modules/.bun/@lydell+node-pty-linux-x64@1.2.0-beta.12/node_modules/@lydell/node-pty-linux-x64 node_modules/@lydell/node-pty-linux-x64 && \
-          cd /app/src/packages/opencode && \
           rm -rf /app/.docker-context && \
           mkdir -p /app/.docker-context && \
           cp /app/src/Dockerfile.mini /app/.docker-context/Dockerfile.mini && \
           tar -C /app/src --exclude='*.map' --exclude='packages/opencode/dist/opencode-*' -cf - opencode packages/opencode/dist packages/opencode/node_modules packages/sdk/js/dist packages/sdk/js/package.json | tar -C /app/.docker-context -xf - && \
           mkdir -p /app/.docker-context/packages/sdk/js/node_modules && \
-          cp -r /app/src/node_modules/.bun/cross-spawn@7.0.6/node_modules/cross-spawn /app/.docker-context/packages/sdk/js/node_modules/cross-spawn && \
-          cp -r /app/src/node_modules/.bun/which@2.0.2/node_modules/which /app/.docker-context/packages/sdk/js/node_modules/which && \
-          cp -r /app/src/node_modules/.bun/isexe@2.0.0/node_modules/isexe /app/.docker-context/packages/sdk/js/node_modules/isexe && \
-          cp -r /app/src/node_modules/.bun/path-key@3.1.1/node_modules/path-key /app/.docker-context/packages/sdk/js/node_modules/path-key && \
-          cp -r /app/src/node_modules/.bun/shebang-command@2.0.0/node_modules/shebang-command /app/.docker-context/packages/sdk/js/node_modules/shebang-command && \
-          cp -r /app/src/node_modules/.bun/shebang-regex@3.0.0/node_modules/shebang-regex /app/.docker-context/packages/sdk/js/node_modules/shebang-regex && \
+          for p in cross-spawn@7.0.6/node_modules/cross-spawn which@2.0.2/node_modules/which isexe@2.0.0/node_modules/isexe path-key@3.1.1/node_modules/path-key shebang-command@2.0.0/node_modules/shebang-command shebang-regex@3.0.0/node_modules/shebang-regex; do cp -r "/app/src/node_modules/.bun/$$p" "/app/.docker-context/packages/sdk/js/node_modules/$${p##*/}"; done && \
           rm -f /app/.docker-context/packages/opencode/dist/node/*.map /app/.docker-context/packages/opencode/dist/node/cli-main.js && \
-          chown -R 1000:1000 /app/.docker-context
+          chown -R 1000:1000 /app/.docker-context && \
+          cd /app/src/packages/opencode && \
+          if [ -d dist/node ]; then mv dist/node /app/.keep-node; fi && \
+          { bun run script/build.ts --single --baseline --skip-install --skip-embed-web-ui > /tmp/build.log 2>&1 && echo BINARY_OK || { tail -15 /tmp/build.log; exit 1; }; } && \
+          if [ -d /app/.keep-node ]; then mkdir -p dist && mv /app/.keep-node dist/node; fi && \
+          tar -czf dist/opencode-linux-x64-baseline.tar.gz -C dist/opencode-linux-x64-baseline/bin opencode
     working_dir: /app
     volumes:
       - ../:/app
@@ -58,9 +57,3 @@ services:
     build:
       context: ../.docker-context
       dockerfile: Dockerfile.mini
-
-  release:
-    image: opencode-release:latest
-    build:
-      context: ../.docker-context-release
-      dockerfile: Dockerfile.release
