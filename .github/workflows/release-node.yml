@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: docker-headless-mini
+          ref: node-release
 
       - uses: ./.github/actions/setup-bun
 
