@@ -73,10 +73,9 @@ jobs:
         run: |
           TREE=$(mktemp -d)
           cp opencode "$TREE/opencode"
-          mkdir -p "$TREE/packages"
+          mkdir -p "$TREE/packages/opencode" "$TREE/packages/sdk/js"
           cp -r packages/opencode/dist "$TREE/packages/opencode/dist"
           cp -r packages/opencode/node_modules "$TREE/packages/opencode/node_modules"
-          mkdir -p "$TREE/packages/sdk/js"
           cp -r packages/sdk/js/dist packages/sdk/js/package.json "$TREE/packages/sdk/js/"
           mkdir -p "$TREE/packages/sdk/js/node_modules"
           for p in cross-spawn@7.0.6/node_modules/cross-spawn which@2.0.2/node_modules/which isexe@2.0.0/node_modules/isexe path-key@3.1.1/node_modules/path-key shebang-command@2.0.0/node_modules/shebang-command shebang-regex@3.0.0/node_modules/shebang-regex; do
