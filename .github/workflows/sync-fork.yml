@@ -1,0 +1,31 @@
+name: sync-fork
+
+# Weekly sync of the fork's `dev` branch with the original anomalyco/opencode `dev`.
+# Runs every Monday at 06:00 UTC; can also be triggered manually.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 1
+
+      - name: Add original as upstream
+        run: |
+          git remote add upstream https://github.com/anomalyco/opencode.git || true
+
+      - name: Sync fork dev with original
+        run: |
+          git fetch upstream dev
+          git merge --ff-only upstream/dev || git merge upstream/dev
+          git push origin dev

@@ -18,6 +18,7 @@ services:
           cd /app/src/packages/sdk/js && \
           rm -rf dist ./*.tsbuildinfo && \
           bun tsc && \
+          chown 1000:1000 /app/src/packages/sdk/js/tsconfig.tsbuildinfo 2>/dev/null || true && \
           cd /app/src/packages/opencode && \
           bun run script/build-node.ts && \
           bun run buildMini.js && \
