@@ -1,11 +1,17 @@
 name: release-node
 
 # Builds the node-based (bun-free runtime) opencode release and publishes it as
-# a GitHub release with a portable tarball. Runs daily and on demand; skips when
-# the version is already released.
+# a GitHub release with a portable tarball. Runs daily and on demand.
 #
-# Uses no external actions (checkout and bun setup are plain shell) so the
-# repo's actions-allowlist policy cannot block it.
+# For each new npm version:
+#   1. detect the latest npm version (skip if node-v<version> is already released)
+#   2. merge the matching upstream release tag (v<version>) into node-release so
+#      the code always matches the version stamp, and push the merge; our
+#      .github/workflows stay untouched (the GITHUB_TOKEN cannot push
+#      workflow-file changes)
+#   3. build the node tarball and publish it
+# Tag merges that conflict fail the run loudly for manual resolution.
+# Uses no external actions so the actions-allowlist policy cannot block it.
 
 on:
   schedule:
@@ -13,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release (optional, defaults to latest npm)"
+        description: "Version to release (optional, defaults to latest npm). Can be used to trial a newer line (e.g. 2.0.28) before it is npm-latest."
         required: false
         type: string
 
@@ -27,7 +33,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        run: git clone --depth 1 --branch node-release "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" .
+        run: |
+          git clone --branch node-release "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/$GITHUB_REPOSITORY.git"
 
       - name: Detect version
         id: version
@@ -42,6 +52,30 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync with upstream tag
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git remote add upstream https://github.com/anomalyco/opencode.git
+          if ! git fetch upstream "refs/tags/v$VERSION:refs/tags/v$VERSION"; then
+            echo "::error::Upstream tag v$VERSION does not exist yet — retry when it is pushed"
+            exit 1
+          fi
+          git merge --no-commit --no-ff "v$VERSION" || true
+          git rm -rq --cached .github/workflows 2>/dev/null || true
+          git checkout HEAD -- .github/workflows 2>/dev/null || true
+          if ! git diff --quiet --cached HEAD; then
+            if ! git commit --no-edit; then
+              git merge --abort 2>/dev/null || true
+              echo "::error::Merge conflict merging upstream tag v$VERSION into node-release — resolve manually:"
+              echo "::error::git fetch origin tag v$VERSION && git merge v$VERSION"
+              exit 1
+            fi
+            git push origin node-release
+          else
+            echo "node-release already contains v$VERSION"
           fi
 
       - name: Setup bun
@@ -67,8 +101,6 @@ jobs:
       - name: Build server bundle and mini
         if: steps.version.outputs.skip != 'true'
         working-directory: packages/opencode
-        env:
-          OPENCODE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           bun run script/build-node.ts
           bun run buildMini.js
