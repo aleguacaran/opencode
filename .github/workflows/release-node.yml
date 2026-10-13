@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release (optional, defaults to latest npm). Can be used to trial a newer line (e.g. 2.0.28) before it is npm-latest."
+        description: "Version to release (optional, defaults to latest npm)"
         required: false
         type: string
 
