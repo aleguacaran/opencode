@@ -1,7 +1,7 @@
 name: release-node
 
 # Builds the node-based (bun-free runtime) opencode release and publishes it as
-# a GitHub release with a portable tarball. Runs daily and on demand.
+# a GitHub release with a portable tarball. Runs every other day and on demand.
 #
 # For each new npm version:
 #   1. detect the latest npm version (skip if node-v<version> is already released)
@@ -15,7 +15,7 @@ name: release-node
 
 on:
   schedule:
-    - cron: "0 6 * * *"
+    - cron: "0 6 */2 * *"
   workflow_dispatch:
     inputs:
       version:
@@ -101,6 +101,12 @@ jobs:
       - name: Build server bundle and mini
         if: steps.version.outputs.skip != 'true'
         working-directory: packages/opencode
+        env:
+          # required: without it Script falls back to the git branch channel
+          # ("node-release", preview mode) and bakes a 0.0.0-node-release-*
+          # version into the bundle, failing the free-tier version gate and
+          # writing a channel-suffixed database
+          OPENCODE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           bun run script/build-node.ts
           bun run buildMini.js

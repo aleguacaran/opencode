@@ -6,11 +6,14 @@
 // Flags mirror the default `opencode run` command.
 // --------------------------------------------
 import { parseArgs } from "node:util";
-import { Server } from "./node.js";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2";
 import { basename, resolve } from "node:path";
 import { statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+
+// Stamped by buildMini.js at build time so --version works without importing
+// the ~37MB server bundle (node.js) below.
+const VERSION = "__OPENCODE_VERSION__"
 
 const usage = `Usage: opencode [flags] <message>
 
@@ -26,7 +29,8 @@ Flags:
       --thinking                include reasoning blocks in the output
       --format <format>         output format: default (text) or json (raw result)
       --pure                    run without user plugins
-  -h, --help                    show this help`;
+  -h, --help                    show this help
+  -v, --version                 print the version`;
 
 function filePart(filePath) {
   const resolvedPath = resolve(filePath);
@@ -67,19 +71,26 @@ async function main() {
       format: { type: "string" },
       pure: { type: "boolean" },
       help: { type: "boolean", short: "h" },
+      version: { type: "boolean", short: "v" },
     },
   });
-  const message = positionals.join(" ");
+  if (flags.version) {
+    console.log(VERSION);
+    process.exit(0);
+  }
   if (flags.help) {
     console.log(usage);
     process.exit(0);
   }
+  if (positionals[0] === "run") positionals.shift();
+  const message = positionals.join(" ");
   if (!message && !flags.command) {
     console.error(usage);
     process.exit(1);
   }
   if (flags.pure) process.env.OPENCODE_PURE = "true";
 
+  const { Server } = await import("./node.js");
   const [providerID, ...modelRest] = (flags.model ?? "").split("/");
   const model = providerID ? { providerID, modelID: modelRest.join("/") } : undefined;
   const files = (flags.file ?? []).map(filePart);
@@ -131,6 +142,10 @@ async function main() {
           variant: flags.variant,
           model: model ? { providerID: model.providerID, modelID: model.modelID } : undefined,
         });
+    if (result.error) {
+      console.error("Error:", result.error);
+      process.exit(1);
+    }
     if (result.data.info?.error) {
       console.error("Model error:", result.data.info.error.data?.message || result.data.info.error);
       process.exit(1);
