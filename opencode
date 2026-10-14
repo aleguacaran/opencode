@@ -1,2 +1,2 @@
 #!/bin/sh
-exec node "$(dirname "$0")/packages/opencode/dist/node/mini.js" "$@"
+exec node "$(dirname "$(readlink -f "$0")")/packages/opencode/dist/node/mini.js" "$@"
