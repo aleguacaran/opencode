@@ -121,9 +121,10 @@ jobs:
           rm -f node_modules/@lydell/node-pty-linux-x64
           cp -r "../../../../node_modules/.bun/@lydell+node-pty-linux-x64@1.2.0-beta.12/node_modules/@lydell/node-pty-linux-x64" node_modules/@lydell/node-pty-linux-x64
 
-      - name: Assemble release tree
+      - name: Assemble release artifacts
         if: steps.version.outputs.skip != 'true'
         run: |
+          VERSION="${{ steps.version.outputs.version }}"
           TREE=$(mktemp -d)
           cp opencode "$TREE/opencode"
           mkdir -p "$TREE/packages/opencode" "$TREE/packages/sdk/js"
@@ -136,6 +137,29 @@ jobs:
           done
           tar -czf opencode-node-linux-x64.tar.gz -C "$TREE" opencode packages
 
+          # Debian package: the tree under /opt/opencode with a wrapper at
+          # /usr/bin/opencode (the wrapper keeps working regardless of how the
+          # launcher resolves its own location). Constant asset name so the
+          # stable releases/latest/download URL works; dpkg reads the version
+          # from the control metadata.
+          DEB=$(mktemp -d)
+          mkdir -p "$DEB/opt/opencode" "$DEB/usr/bin" "$DEB/DEBIAN"
+          cp -r "$TREE"/. "$DEB/opt/opencode/"
+          printf '#!/bin/sh\nexec /opt/opencode/opencode "$@"\n' > "$DEB/usr/bin/opencode"
+          chmod 755 "$DEB/usr/bin/opencode"
+          {
+            printf 'Package: opencode-node\n'
+            printf 'Version: %s\n' "$VERSION"
+            printf 'Architecture: amd64\n'
+            printf 'Section: net\n'
+            printf 'Maintainer: Brian Guacaran <brianguacaran@gmail.com>\n'
+            printf 'Description: Node-based opencode CLI (bun-free runtime)\n'
+            printf ' Headless opencode built to run on plain node >= 22.\n'
+            printf ' The tree is installed under /opt/opencode with a launcher\n'
+            printf ' at /usr/bin/opencode.\n'
+          } > "$DEB/DEBIAN/control"
+          dpkg-deb --root-owner-group --build "$DEB" opencode-node-linux-x64.deb
+
       - name: Release
         if: steps.version.outputs.skip != 'true'
         env:
@@ -143,6 +167,7 @@ jobs:
         run: |
           gh release create "node-v${{ steps.version.outputs.version }}" \
             opencode-node-linux-x64.tar.gz \
+            opencode-node-linux-x64.deb \
             -R "$GITHUB_REPOSITORY" \
             --title "node-v${{ steps.version.outputs.version }}" \
             --notes "Node-based opencode ${{ steps.version.outputs.version }} (no bun needed at runtime). Extract and run ./opencode with node >= 22." \
