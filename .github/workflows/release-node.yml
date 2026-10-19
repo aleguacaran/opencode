@@ -1,0 +1,177 @@
+name: release-node
+
+# Builds the node-based (bun-free runtime) opencode release and publishes it as
+# a GitHub release with a portable tarball. Runs every other day and on demand.
+#
+# For each new npm version:
+#   1. detect the latest npm version (skip if node-v<version> is already released)
+#   2. rebase node-release (release tag + our patch series) onto the matching
+#      upstream release tag (v<version>) so the code always matches the
+#      version stamp, force-push the rebased branch and keep the base tag on
+#      the fork; upstream tags are separate lineages, so a rebase is the only
+#      conflict-free sync
+#   3. build the node tarball and debian package and publish them
+# A rebase that conflicts fails the run loudly for manual resolution.
+# Uses no external actions so the actions-allowlist policy cannot block it.
+
+on:
+  schedule:
+    - cron: "0 6 */2 * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (optional, defaults to latest npm)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency: release-node-${{ github.ref }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        run: |
+          git clone --branch node-release "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/$GITHUB_REPOSITORY.git"
+
+      - name: Detect version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LATEST=$(curl -fsSL https://registry.npmjs.org/opencode-ai/latest | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -1)
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION:-$LATEST}"
+          if gh release view "node-v$VERSION" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "node-v$VERSION already released"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync with upstream tag
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git remote add upstream https://github.com/anomalyco/opencode.git
+          if ! git fetch upstream "refs/tags/v$VERSION:refs/tags/v$VERSION"; then
+            echo "::error::Upstream tag v$VERSION does not exist yet — retry when it is pushed"
+            exit 1
+          fi
+          BASE=$(git describe --tags --abbrev=0 HEAD)
+          if [ "$BASE" = "v$VERSION" ]; then
+            echo "node-release is already based on v$VERSION"
+            exit 0
+          fi
+          # Upstream cuts each release tag as a separate lineage (tags are not
+          # ancestors of each other), so merging would conflict on every
+          # version field. Rebase the patch series onto the new tag instead.
+          if ! git rebase --onto "v$VERSION" "$BASE"; then
+            git rebase --abort 2>/dev/null || true
+            echo "::error::Rebasing onto upstream tag v$VERSION conflicted — resolve manually:"
+            echo "::error::git fetch origin tag v$VERSION && git rebase --onto v$VERSION $BASE"
+            exit 1
+          fi
+          git push --force-with-lease origin node-release
+          git push origin "refs/tags/v$VERSION:refs/tags/v$VERSION"
+
+      - name: Setup bun
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          BUN=$(sed -n 's/.*"packageManager":[[:space:]]*"bun@\([^"]*\)".*/\1/p' package.json)
+          if [ -n "$BUN" ]; then
+            curl -fsSL https://bun.sh/install | bash -s "bun-v$BUN"
+          else
+            curl -fsSL https://bun.sh/install | bash
+          fi
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        if: steps.version.outputs.skip != 'true'
+        run: bun install
+
+      - name: Build SDK
+        if: steps.version.outputs.skip != 'true'
+        working-directory: packages/sdk/js
+        run: bun tsc
+
+      - name: Build server bundle and mini
+        if: steps.version.outputs.skip != 'true'
+        working-directory: packages/opencode
+        env:
+          # required: without it Script falls back to the git branch channel
+          # ("node-release", preview mode) and bakes a 0.0.0-node-release-*
+          # version into the bundle, failing the free-tier version gate and
+          # writing a channel-suffixed database
+          OPENCODE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          bun run script/build-node.ts
+          bun run buildMini.js
+
+      - name: Install runtime externals
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          mkdir -p packages/opencode/dist/node/node_modules
+          cd packages/opencode/dist/node
+          cp -r ../../../../node_modules/.bun/jsonc-parser@3.3.1/node_modules/jsonc-parser node_modules/jsonc-parser
+          cp -r "../../../../node_modules/.bun/@lydell+node-pty@1.2.0-beta.12/node_modules/@lydell" node_modules/@lydell
+          rm -f node_modules/@lydell/node-pty-linux-x64
+          cp -r "../../../../node_modules/.bun/@lydell+node-pty-linux-x64@1.2.0-beta.12/node_modules/@lydell/node-pty-linux-x64" node_modules/@lydell/node-pty-linux-x64
+
+      - name: Assemble release artifacts
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TREE=$(mktemp -d)
+          cp opencode "$TREE/opencode"
+          mkdir -p "$TREE/packages/opencode" "$TREE/packages/sdk/js"
+          cp -r packages/opencode/dist "$TREE/packages/opencode/dist"
+          cp -r packages/opencode/node_modules "$TREE/packages/opencode/node_modules"
+          cp -r packages/sdk/js/dist packages/sdk/js/package.json "$TREE/packages/sdk/js/"
+          mkdir -p "$TREE/packages/sdk/js/node_modules"
+          for p in cross-spawn@7.0.6/node_modules/cross-spawn which@2.0.2/node_modules/which isexe@2.0.0/node_modules/isexe path-key@3.1.1/node_modules/path-key shebang-command@2.0.0/node_modules/shebang-command shebang-regex@3.0.0/node_modules/shebang-regex; do
+            cp -r "node_modules/.bun/$p" "$TREE/packages/sdk/js/node_modules/${p##*/}"
+          done
+          tar -czf opencode-node-linux-x64.tar.gz -C "$TREE" opencode packages
+
+          # Debian package: the tree under /opt/opencode with a wrapper at
+          # /usr/bin/opencode (the wrapper keeps working regardless of how the
+          # launcher resolves its own location). Constant asset name so the
+          # stable releases/latest/download URL works; dpkg reads the version
+          # from the control metadata.
+          DEB=$(mktemp -d)
+          mkdir -p "$DEB/opt/opencode" "$DEB/usr/bin" "$DEB/DEBIAN"
+          cp -r "$TREE"/. "$DEB/opt/opencode/"
+          printf '#!/bin/sh\nexec /opt/opencode/opencode "$@"\n' > "$DEB/usr/bin/opencode"
+          chmod 755 "$DEB/usr/bin/opencode"
+          {
+            printf 'Package: opencode-node\n'
+            printf 'Version: %s\n' "$VERSION"
+            printf 'Architecture: amd64\n'
+            printf 'Section: net\n'
+            printf 'Maintainer: Brian Guacaran <brianguacaran@gmail.com>\n'
+            printf 'Description: Node-based opencode CLI (bun-free runtime)\n'
+            printf ' Headless opencode built to run on plain node >= 22.\n'
+            printf ' The tree is installed under /opt/opencode with a launcher\n'
+            printf ' at /usr/bin/opencode.\n'
+          } > "$DEB/DEBIAN/control"
+          dpkg-deb --root-owner-group --build "$DEB" opencode-node-linux-x64.deb
+
+      - name: Release
+        if: steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "node-v${{ steps.version.outputs.version }}" \
+            opencode-node-linux-x64.tar.gz \
+            opencode-node-linux-x64.deb \
+            -R "$GITHUB_REPOSITORY" \
+            --title "node-v${{ steps.version.outputs.version }}" \
+            --notes "Node-based opencode ${{ steps.version.outputs.version }} (no bun needed at runtime). Extract and run ./opencode with node >= 22." \
+            --target "$(git rev-parse HEAD)"
