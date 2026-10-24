@@ -60,7 +60,7 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           git remote add upstream https://github.com/anomalyco/opencode.git
-          if ! git fetch upstream "refs/tags/v$VERSION:refs/tags/v$VERSION"; then
+          if ! git fetch --no-tags upstream "refs/tags/v$VERSION:refs/tags/v$VERSION"; then
             echo "::error::Upstream tag v$VERSION does not exist yet — retry when it is pushed"
             exit 1
           fi
@@ -77,6 +77,15 @@ jobs:
             echo "::error::Rebasing onto upstream tag v$VERSION conflicted — resolve manually:"
             echo "::error::git fetch origin tag v$VERSION && git rebase --onto v$VERSION $BASE"
             exit 1
+          fi
+          # The GITHUB_TOKEN can never push workflow-file changes, and the
+          # rebased branch would carry upstream's workflow deltas from the new
+          # tag. Restore the workflow directory exactly as it was before the
+          # rebase so the pushed diff touches no .github/workflows files.
+          git rm -rq --cached .github/workflows 2>/dev/null || true
+          git checkout ORIG_HEAD -- .github/workflows 2>/dev/null || true
+          if ! git diff --quiet --cached HEAD; then
+            git commit --amend --no-edit
           fi
           git push --force-with-lease origin node-release
           git push origin "refs/tags/v$VERSION:refs/tags/v$VERSION"
