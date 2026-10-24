@@ -44,6 +44,10 @@ services:
     volumes:
       - .:/app
     user: root
+    environment:
+      # keep the repo's husky install from re-arming the pre-push hook
+      # (core.hooksPath is disabled locally; husky resets it otherwise)
+      HUSKY: "0"
 
   runtime:
     image: node:lts-slim
