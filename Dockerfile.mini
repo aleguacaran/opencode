@@ -1,0 +1,7 @@
+FROM node:lts-slim
+WORKDIR /app
+COPY opencode ./opencode
+COPY packages/opencode/dist ./packages/opencode/dist
+COPY packages/opencode/node_modules ./packages/opencode/node_modules
+COPY packages/sdk/js ./packages/sdk/js
+ENTRYPOINT ["/app/opencode"]
