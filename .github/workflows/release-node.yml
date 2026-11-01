@@ -5,13 +5,16 @@ name: release-node
 #
 # For each new npm version:
 #   1. detect the latest npm version (skip if node-v<version> is already released)
-#   2. rebase node-release (release tag + our patch series) onto the matching
-#      upstream release tag (v<version>) so the code always matches the
-#      version stamp, force-push the rebased branch and keep the base tag on
-#      the fork; upstream tags are separate lineages, so a rebase is the only
-#      conflict-free sync
+#   2. reconstruct node-release deterministically: check out the matching
+#      upstream release tag (v<version>), restore the patch-series files from
+#      the previous tip, and flip the SDK exports to dist — so the code always
+#      matches the version stamp, then force-push the branch and keep the base
+#      tag on the fork. Upstream cuts each release tag as a separate lineage
+#      (tags are not ancestors of each other), which makes merge and rebase
+#      base-detection unreliable; reconstruction from files is deterministic.
+#      The GITHUB_TOKEN can never push workflow-file changes, so the whole
+#      .github/workflows directory is restored to its previous content first.
 #   3. build the node tarball and debian package and publish them
-# A rebase that conflicts fails the run loudly for manual resolution.
 # Uses no external actions so the actions-allowlist policy cannot block it.
 
 on:
@@ -69,24 +72,21 @@ jobs:
             echo "node-release is already based on v$VERSION"
             exit 0
           fi
-          # Upstream cuts each release tag as a separate lineage (tags are not
-          # ancestors of each other), so merging would conflict on every
-          # version field. Rebase the patch series onto the new tag instead.
-          if ! git rebase --onto "v$VERSION" "$BASE"; then
-            git rebase --abort 2>/dev/null || true
-            echo "::error::Rebasing onto upstream tag v$VERSION conflicted — resolve manually:"
-            echo "::error::git fetch origin tag v$VERSION && git rebase --onto v$VERSION $BASE"
-            exit 1
-          fi
-          # The GITHUB_TOKEN can never push workflow-file changes, and the
-          # rebased branch would carry upstream's workflow deltas from the new
-          # tag. Restore the workflow directory exactly as it was before the
-          # rebase so the pushed diff touches no .github/workflows files.
+          OLD=$(git rev-parse HEAD)
+          git checkout -B node-release "v$VERSION"
+          git checkout "$OLD" -- .github/workflows/release-node.yml install-opencode.sh opencode compose.yml release.sh Dockerfile.mini packages/opencode/src/mini.js packages/opencode/buildMini.js NODE-RELEASE.md
+          # The GITHUB_TOKEN can never push workflow-file changes; restore the
+          # whole workflows directory to its previous content so the pushed
+          # diff touches no .github/workflows files.
           git rm -rq --cached .github/workflows 2>/dev/null || true
-          git checkout ORIG_HEAD -- .github/workflows 2>/dev/null || true
-          if ! git diff --quiet --cached HEAD; then
-            git commit --amend --no-edit
+          git checkout "$OLD" -- .github/workflows 2>/dev/null || true
+          sed -i '/"exports": {/,/^  }/ { s|"./src/|"./dist/|g; s|\.ts"|.js"|g; }' packages/sdk/js/package.json
+          git add packages/sdk/js/package.json
+          if git diff --quiet HEAD; then
+            echo "node-release already matches v$VERSION plus the patch series"
+            exit 0
           fi
+          git commit -m "chore: apply node-release patch series onto v$VERSION"
           git push --force-with-lease origin node-release
           git push origin "refs/tags/v$VERSION:refs/tags/v$VERSION"
 
